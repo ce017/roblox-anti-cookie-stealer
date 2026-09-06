@@ -18,10 +18,24 @@ function Log($m){ "$(Get-Date -f 'yyyy-MM-dd HH:mm:ss')  $m" | Out-File $Log -Ap
 $RobloxProcs = @('RobloxPlayerBeta','RobloxStudioBeta')
 
 function Get-CookieStores {
+  # Roblox keeps the session in TWO places:
+  #  1. the WebView2 cookie jars (Chromium SQLite)
+  #  2. %LOCALAPPDATA%\Roblox\LocalStorage\RobloxCookies.dat - a DPAPI-encrypted
+  #     blob used by the Player/Studio client itself. DPAPI is no protection
+  #     against a stealer: it decrypts automatically for any process running as
+  #     you. Clearing only the WebView2 jars leaves the session on disk.
+  # Only RobloxCookies.dat is touched in LocalStorage - appStorage.json next to
+  # it holds your app settings and must be left alone.
   $root = Join-Path $env:LOCALAPPDATA 'Roblox'
   if (-not (Test-Path $root)) { return @() }
-  Get-ChildItem $root -Recurse -Force -Filter 'Cookies' -EA SilentlyContinue |
-    Where-Object { -not $_.PSIsContainer -and $_.FullName -match 'WebView2|EBWebView' }
+
+  $out = @(Get-ChildItem $root -Recurse -Force -Filter 'Cookies' -EA SilentlyContinue |
+           Where-Object { -not $_.PSIsContainer -and $_.FullName -match 'WebView2|EBWebView' })
+
+  $dat = Join-Path $root 'LocalStorage\RobloxCookies.dat'
+  if (Test-Path $dat) { $out += Get-Item $dat -Force }
+
+  return $out
 }
 
 function Test-RobloxRunning {
