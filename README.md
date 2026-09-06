@@ -78,23 +78,91 @@ worthless when you are not playing. 2FA continues to work normally.
 
 ## Install
 
-Requires Windows 10/11 and PowerShell 5.1+. **No admin. Nothing is downloaded.**
+**You run the installer once. After that it starts by itself, forever.**
+There is nothing to click again and nothing to remember.
+
+Needs Windows 10/11. **No admin rights. Nothing is downloaded. No reboot.**
+
+### Step 1 - get the files
+
+Click the green **Code** button at the top of this page, choose
+**Download ZIP**, then right-click the ZIP and **Extract All**.
+
+(Or, if you have git: `git clone https://github.com/ce017/roblox-anti-cookie-stealer`)
+
+### Step 2 - open PowerShell in that folder
+
+Open the extracted folder. Hold **Shift**, right-click on any empty space
+inside it, and choose **"Open PowerShell window here"** (on Windows 11 it may
+say **"Open in Terminal"**).
+
+### Step 3 - run the installer
+
+Copy this line, paste it in, press Enter:
 
 ```powershell
-git clone https://github.com/ce017/roblox-anti-cookie-stealer
-cd roblox-anti-cookie-stealer
 powershell -ExecutionPolicy Bypass -File install.ps1
 ```
 
-Only want one of them:
+You should see:
+
+```
+  [+] StealerCanary installed and started
+  [+] RobloxSessionGuard installed and started
+```
+
+**That's it. You are now protected, immediately - no reboot needed.**
+
+Only want one of the two:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File install.ps1 -CanaryOnly
 powershell -ExecutionPolicy Bypass -File install.ps1 -GuardOnly
 ```
 
-Both register as per-user scheduled tasks that start at logon and restart if
-they crash.
+---
+
+## How it runs (read this if you are unsure whether it is working)
+
+| Question | Answer |
+|---|---|
+| Do I have to start it every time? | **No.** It starts automatically when you log into Windows. |
+| Do I need to keep a window open? | **No.** It runs hidden in the background. |
+| Do I need to run it as admin? | **No.** |
+| Do I need to reboot after installing? | **No.** It starts the moment you install it. |
+| Does it survive a restart? | **Yes.** It re-starts at every logon. |
+| What if it crashes? | Windows automatically restarts it, up to 3 times. |
+| Does it run when I am logged out? | No - and it does not need to. Nothing runs as you then either. |
+
+It installs as two **Windows scheduled tasks** with an *at logon* trigger.
+
+### Checking it is actually running
+
+Paste this into PowerShell at any time:
+
+```powershell
+Get-ScheduledTask StealerCanary, RobloxSessionGuard | Select-Object TaskName, State
+```
+
+`State: Running` on both means you are protected. If one says `Ready` instead
+of `Running`, it is registered but stopped - start it again with:
+
+```powershell
+Start-ScheduledTask -TaskName StealerCanary
+Start-ScheduledTask -TaskName RobloxSessionGuard
+```
+
+### Testing that it works
+
+The easiest real test: **open Roblox, log in, then fully close it.** Wait about
+30 seconds, then open the log:
+
+```powershell
+notepad $env:LOCALAPPDATA\RobloxSessionGuard\guard.log
+```
+
+You should see a `cleared ... Cookies` line. That means your session token was
+wiped and is no longer sitting on disk for malware to steal.
 
 ### Uninstall
 
