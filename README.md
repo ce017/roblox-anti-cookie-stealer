@@ -62,13 +62,28 @@ all. That is why the installer registers the tasks as **Interactive**.
 
 ### RobloxSessionGuard
 
-Polls every 20 seconds. When no Roblox process is running, it deletes the
-Roblox WebView2 cookie stores:
+Polls every 20 seconds. When Roblox is not in use, it clears **both** places
+Roblox keeps your session:
 
 ```
 %LOCALAPPDATA%\Roblox\UniversalApp\WebView2\EBWebView\...\Network\Cookies
 %LOCALAPPDATA%\Roblox\RobloxStudio\WebView2\EBWebView\...\Network\Cookies
+%LOCALAPPDATA%\Roblox\LocalStorage\RobloxCookies.dat
 ```
+
+That last one matters and is easy to miss. The WebView2 jars are Chromium
+SQLite databases, but the Player and Studio clients *also* keep the session
+in `RobloxCookies.dat` - a DPAPI-encrypted blob. **DPAPI is no protection
+here:** it decrypts automatically for any process running as your user, which
+is exactly what an infostealer is. Clearing only the WebView2 jars leaves your
+session sitting on disk while appearing to have worked.
+
+Only `RobloxCookies.dat` is touched inside `LocalStorage` - `appStorage.json`
+beside it holds your app settings and is left alone.
+
+**"In use" means Roblox owns a visible window**, not merely that a process
+exists. Roblox autostarts a tray-resident `RobloxPlayerBeta.exe` that never
+exits, so a naive process-name check would mean the guard never fires.
 
 Roblox recreates them on next launch. **Trade-off: you sign in again every time
 you open Roblox.** That is the entire cost, and it is what makes a stolen cookie
