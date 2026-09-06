@@ -1,7 +1,7 @@
 <#  StealerCanary - detects infostealer staging activity.
     Signature: a freshly-created random-hex directory that rapidly fills with
-    copies of browser credential databases, e.g. C:\ProgramData\<10 hex chars>\ ,
-    which is what the 2026-09-05 incident in the README looked like on disk.
+    copies of browser credential databases. Exactly what C:\ProgramData\fc88195fa9
+    was on 2026-09-05.
 
     ALERTING IS MULTI-CHANNEL ON PURPOSE. A popup alone is not reliable:
       - exclusive-fullscreen games hide it
@@ -130,6 +130,83 @@ ACTION REQUIRED
 }
 
 function Show-PendingAlert {
+  $pend = Join-Path $LogDir "pending_alert.txt"
+  if (-not (Test-Path $pend)) { return }
+  $txt = Get-Content $pend -Raw
+  try { 1..4 | ForEach-Object { [Console]::Beep(1200,250); [Console]::Beep(800,250) } } catch {}
+  try {
+    $w = New-Object -ComObject WScript.Shell
+    $null = $w.Popup($txt, 0, "StealerCanary - THEFT BLOCKED - ACTION REQUIRED", 16)
+  } catch {}
+  try { Start-Process notepad.exe $pend } catch {}
+  $ack = Join-Path $LogDir ("acknowledged_" + (Get-Date -f 'yyyyMMdd_HHmmss') + ".txt")
+  Move-Item $pend $ack -Force -EA SilentlyContinue
+  Log "pending alert shown and acknowledged -> $ack"
+}
+
+function Get-FileSignals($path) {
+  # All checks are CONTENT based, never filename based: staged copies are
+  # routinely renamed to random hex with no extension (as in the 2026-09-05
+  # incident), so extensions tell you nothing.
+  $sig = @{ Sqlite=$false; LevelDb=$false; DiscordToken=$false; LocalState=$false }
+  try {
+    $fs = [IO.File]::OpenRead($path)
+    try {
+      $len = $fs.Length
+      if ($len -lt 16) { return $sig }
+      $head = New-Object byte[] ([Math]::Min(64,$len))
+      $null = $fs.Read($head,0,$head.Length)
+      if ($head.Length -ge 15 -and [Text.Encoding]::ASCII.GetString($head,0,15) -eq 'SQLite format 3') {
+        $sig.Sqlite = $true
+      }
+      # LevelDB SSTable footer magic (0xdb4775248b80fb57 little-endian) at EOF
+      if ($len -ge 48) {
+        $null = $fs.Seek($len-48, 'Begin')
+        $tail = New-Object byte[] 48
+        $null = $fs.Read($tail,0,48)
+        $magic = [byte[]](0x57,0xfb,0x80,0x8b,0x24,0x75,0x47,0xdb)
+        for ($i=0; $i -le 40 -and -not $sig.LevelDb; $i++) {
+          $m = $true
+          for ($j=0; $j -lt 8; $j++) { if ($tail[$i+$j] -ne $magic[$j]) { $m=$false; break } }
+          if ($m) { $sig.LevelDb = $true }
+        }
+      }
+      # Only scan bodies that are plausibly credential stores, to stay fast
+      if ($sig.LevelDb -or $len -lt 2MB) {
+        $cap = [int][Math]::Min($len, 8MB)
+        $null = $fs.Seek(0,'Begin')
+        $body = New-Object byte[] $cap
+        $null = $fs.Read($body,0,$cap)
+        $txt = [Text.Encoding]::ASCII.GetString($body)
+        if ($txt.Contains('dQw4w9WgXcQ:')) { $sig.DiscordToken = $true }
+        if ($txt.Contains('os_crypt') -or $txt.Contains('encrypted_key')) { $sig.LocalState = $true }
+      }
+    } finally { $fs.Close() }
+  } catch {}
+  return $sig
+}
+
+function Inspect($dir){
+  Start-Sleep -Milliseconds 1500
+  $files = @(Get-ChildItem $dir -File -Force -EA SilentlyContinue)
+  if ($files.Count -lt 3) { return }
+  $sqlite=0; $leveldb=0; $token=0; $localstate=0
+  foreach ($f in ($files | Select-Object -First 60)) {
+    $s = Get-FileSignals $f.FullName
+    if ($s.Sqlite)       { $sqlite++ }
+    if ($s.LevelDb)      { $leveldb++ }
+    if ($s.DiscordToken) { $token++ }
+    if ($s.LocalState)   { $localstate++ }
+  }
+  $cred = $sqlite + $leveldb + $localstate
+  if     ($token -ge 1)   { Alert $dir "$($files.Count) files - DISCORD SESSION TOKEN found in a staged copy ($token file(s))" }
+  elseif ($sqlite -ge 2)  { Alert $dir "$($files.Count) files, $sqlite SQLite DBs (browser credential stores)" }
+  elseif ($leveldb -ge 3) { Alert $dir "$($files.Count) files, $leveldb LevelDB segments (Discord / Chromium token stores)" }
+  elseif ($cred -ge 3)    { Alert $dir "$($files.Count) files, $cred credential-store artifacts (sqlite=$sqlite leveldb=$leveldb localstate=$localstate)" }
+  elseif ($files.Count -ge 40) { Alert $dir "$($files.Count) files created at once in a random-hex directory" }
+}
+
+Show-PendingAlert {
   $pend = Join-Path $LogDir "pending_alert.txt"
   if (-not (Test-Path $pend)) { return }
   $txt = Get-Content $pend -Raw

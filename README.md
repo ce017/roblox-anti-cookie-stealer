@@ -45,16 +45,31 @@ browser credential databases** (files beginning `SQLite format 3`). That is the
 signature of essentially every commodity infostealer — Lumma, Vidar, StealC,
 Rhadamanthys and friends all stage to disk this way before uploading.
 
-Triggers on 2+ SQLite databases in such a directory, or 40+ files appearing at
-once. On detection it:
+It detects **by file content, never by filename** - staged copies are routinely
+renamed to random hex with no extension, so extensions tell you nothing. It
+recognises four credential-store signatures:
 
-- saves **evidence first** — directory listing plus the full running-process
+| Signature | What it catches |
+|---|---|
+| `SQLite format 3` header | browser cookie / login / autofill databases |
+| LevelDB SSTable footer magic | Discord and Chromium token stores |
+| `dQw4w9WgXcQ:` marker | a Discord session token in a staged copy |
+| `os_crypt` / `encrypted_key` | Chromium `Local State` master-key file |
+
+It fires on: any Discord token found, or 2+ SQLite DBs, or 3+ LevelDB
+segments, or 3+ mixed credential artifacts, or 40+ files appearing at once.
+
+The LevelDB rules matter because a **Discord-only** token grab stages fewer
+than ten files and contains no SQLite at all - it slid under a SQLite-only
+threshold completely. On detection it:
+
+- saves **evidence first** - directory listing plus the full running-process
   table with start times, so the culprit is identifiable afterwards
-- **beeps loudly** — the only channel that reaches you inside a fullscreen game
+- **beeps loudly** - the only channel that reaches you inside a fullscreen game
 - drops a **`!! STEALER ALERT <time>.txt` marker on your Desktop**
 - shows a popup and writes to a log
 - optionally kills the suspect process and/or shuts the machine down (**off by
-  default** — see below)
+  default** - see below)
 
 Alerting is deliberately multi-channel. A popup alone is unreliable: exclusive
 fullscreen hides it, and a task running in session 0 cannot draw a window at
