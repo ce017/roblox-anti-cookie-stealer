@@ -14,7 +14,8 @@ $Log    = "$LogDir\guard.log"
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 function Log($m){ "$(Get-Date -f 'yyyy-MM-dd HH:mm:ss')  $m" | Out-File $Log -Append -Encoding utf8 }
 
-$RobloxProcs = @('RobloxPlayerBeta','RobloxStudioBeta','RobloxCrashHandler','Roblox')
+# Only these count. RobloxCrashHandler is a helper that lingers, not the app.
+$RobloxProcs = @('RobloxPlayerBeta','RobloxStudioBeta')
 
 function Get-CookieStores {
   $root = Join-Path $env:LOCALAPPDATA 'Roblox'
@@ -24,8 +25,15 @@ function Get-CookieStores {
 }
 
 function Test-RobloxRunning {
+  # IMPORTANT: Roblox autostarts a tray-resident RobloxPlayerBeta.exe
+  # ("--launch-to-tray") that never exits. Merely checking for the process
+  # name means "Roblox is running" is ALWAYS true and the guard never fires.
+  # Roblox is only genuinely in use when it owns a visible window
+  # (the tray process reports MainWindowHandle = 0).
   foreach ($n in $RobloxProcs) {
-    if (Get-Process -Name $n -EA SilentlyContinue) { return $true }
+    foreach ($p in (Get-Process -Name $n -EA SilentlyContinue)) {
+      try { if ($p.MainWindowHandle -ne 0) { return $true } } catch {}
+    }
   }
   return $false
 }
@@ -51,16 +59,27 @@ function Clear-Sessions {
 }
 
 Log "guard started (pid $PID)"
-$wasRunning = Test-RobloxRunning
-if (-not $wasRunning) { Log "no Roblox running at startup - clearing"; Clear-Sessions }
+$wasInUse = Test-RobloxRunning
+Log "Roblox in use at startup: $wasInUse"
+if (-not $wasInUse) { Log "not in use at startup - clearing"; Clear-Sessions }
 
+$idleStreak = 0
 while ($true) {
   Start-Sleep -Seconds 20
   $now = Test-RobloxRunning
-  if ($wasRunning -and -not $now) {
-    Log "Roblox closed - clearing session"
-    Start-Sleep -Seconds 3           # let it finish flushing to disk
+
+  if ($now) { $idleStreak = 0 }
+  else      { $idleStreak++ }
+
+  # Clear on the transition in-use -> idle, but only once the idle state has
+  # held for two polls, so a window that has not been created yet during
+  # launch cannot cause us to wipe a session mid-login.
+  if ($wasInUse -and -not $now -and $idleStreak -ge 2) {
+    Log "Roblox no longer in use - clearing session"
+    Start-Sleep -Seconds 3
     Clear-Sessions
+    $wasInUse = $false
+    continue
   }
-  $wasRunning = $now
+  if ($now) { $wasInUse = $true }
 }
